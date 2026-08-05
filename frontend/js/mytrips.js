@@ -7,7 +7,7 @@ async function loadTrips() {
 
     try {
 
-        const response = await fetch("http://localhost:5000/api/trips");
+        const response = await fetch("https://smarttrip-wpja.onrender.com/api/trips");
 
         const trips = await response.json();
         allTrips = trips;
@@ -63,7 +63,7 @@ function displayTrips(trips) {
         btn.onclick = async () => {
 
             const response = await fetch(
-                `http://localhost:5000/api/trips/${btn.dataset.id}`
+                `https://smarttrip-wpja.onrender.com/api/trips/${btn.dataset.id}`
             );
 
             const trip = await response.json();
@@ -90,7 +90,7 @@ function displayTrips(trips) {
         if (!confirm("Delete this trip?")) return;
 
         await fetch(
-            `http://localhost:5000/api/trips/${btn.dataset.id}`,
+            `https://smarttrip-wpja.onrender.com/api/trips/${btn.dataset.id}`,
             {
                 method: "DELETE"
             }

@@ -27,7 +27,7 @@ generateBtn.addEventListener("click", async () => {
 
     try {
 
-        const response = await fetch("http://localhost:5000/api/plan", {
+        const response = await fetch("https://smarttrip-wpja.onrender.com/api/plan", {
 
             method: "POST",
 
@@ -211,7 +211,7 @@ console.log("Saving day cards:",
 
     try {
 
-        const response = await fetch("http://localhost:5000/api/trips/save", {
+        const response = await fetch("https://smarttrip-wpja.onrender.com/api/trips/save", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
