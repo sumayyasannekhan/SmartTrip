@@ -9,13 +9,28 @@ if (!token) {
 }
 console.log("planner.js loaded");
 const generateBtn = document.getElementById("generateBtn");
+let isGenerating = false;
 
 generateBtn.addEventListener("click", async () => {
 
-    const destination = document.getElementById("destination").value;
+    if (isGenerating) {
+        console.log("⚠️ Generation already running. Ignoring duplicate click.");
+        return;
+    }
+
+    const destination = document.getElementById("destination").value.trim();
     const days = document.getElementById("days").value;
     const budget = document.getElementById("budget").value;
     const interest = document.getElementById("interest").value;
+
+    if (!destination || !days || !budget) {
+        alert("Please fill all fields");
+        return;
+    }
+
+    isGenerating = true;
+    generateBtn.disabled = true;
+    generateBtn.innerText = "Generating...";
 
     if (!destination || !days || !budget) {
         alert("Please fill all fields");
@@ -130,12 +145,18 @@ document.getElementById("result").innerHTML = `
 console.log(document.getElementById("result").innerHTML);
     } catch (err) {
 
-        document.getElementById("result").innerHTML =
-            "<h2> Unable to generate itinerary.</h2>";
+    document.getElementById("result").innerHTML =
+        "<h2>❌ Unable to generate itinerary.</h2>";
 
-        console.log(err);
+    console.error("Generation error:", err);
 
-    }
+} finally {
+
+    isGenerating = false;
+    generateBtn.disabled = false;
+    generateBtn.innerText = "Generate AI Itinerary";
+
+}
 
 });
 const downloadBtn = document.getElementById("downloadBtn");

@@ -9,7 +9,7 @@ const Groq = require("groq-sdk");
 const tripRoutes = require("./routes/trips");
 
 const app = express();
-
+let planGenerating = false;
 connectDB();
 
 app.use(cors());
@@ -23,19 +23,24 @@ const groq = new Groq({
 app.get("/", (req, res) => {
   res.send("🚀 SmartTrip Backend Running");
 });
-async function generateChunk(prompt) {
+async function generateChunk(prompt, attempt = 1) {
+
     try {
-        console.log("🤖 Sending request to Groq...");
+
+        console.log(`🤖 Sending request to Groq... Attempt ${attempt}`);
 
         const completion = await groq.chat.completions.create({
+
             model: "openai/gpt-oss-120b",
+
             messages: [
                 {
                     role: "user",
                     content: prompt
                 }
             ],
-            max_completion_tokens: 2500,
+
+            max_completion_tokens: 1500,
             temperature: 0.7
         });
 
@@ -43,64 +48,113 @@ async function generateChunk(prompt) {
 
         return completion.choices[0].message.content;
 
-    } 
-     
-    catch (error) {
+    } catch (error) {
 
         console.error("❌ GROQ REQUEST FAILED");
         console.error("Status:", error.status);
         console.error("Message:", error.message);
-        console.error("Response:", error.response?.data);
+
+        if (error.status === 429 && attempt <= 3) {
+
+            const waitTime =
+                Number(error.headers?.get?.("retry-after")) * 1000 ||
+                6000 * attempt;
+
+            console.log(
+                `⏳ Rate limit. Waiting ${waitTime / 1000}s...`
+            );
+
+            await new Promise(resolve =>
+                setTimeout(resolve, waitTime)
+            );
+
+            return generateChunk(prompt, attempt + 1);
+        }
 
         throw error;
     }
 }
+ 
 app.post("/api/plan", async (req, res) => {
-    console.log("✅ /api/plan called");
-    console.log(req.body);
 
-  try {
-    const { destination, days, budget, interest } = req.body;
+    console.log("=================================");
+    console.log("🔥 /api/plan called");
+    console.log("Time:", new Date().toISOString());
+    console.log("Body:", req.body);
+    console.log("=================================");
 
-  
-let imageUrl = "";
+    if (planGenerating) {
+        console.log("⚠️ Another plan is already being generated.");
 
-try {
-    const imageResponse = await axios.get(
-        "https://api.unsplash.com/search/photos",
-        {
-            params: {
-                query: `${destination} India`,
-                per_page: 1,
-                orientation: "landscape"
-            },
-            headers: {
-                Authorization: `Client-ID ${process.env.UNSPLASH_ACCESS_KEY}`
-            }
-        }
-    );
+        return res.status(429).json({
+            error: "A travel plan is already being generated. Please wait."
+        });
+    }
 
-    if (imageResponse.data.results.length > 0) {
-    imageUrl = imageResponse.data.results[0].urls.regular;
-} else {
-    imageUrl = "https://images.unsplash.com/photo-1506744038136-46273834b3fb";
-}
-} catch (err) {
-    console.log("Unsplash Error:", err.message);
-}
-let plan = "";
-
-const totalDays = Number(days);
-
-for (let start = 1; start <= totalDays; start++) {
-
-    const end = start;
+    planGenerating = true;
 
     try {
 
-        console.log(`🚀 Requesting Days ${start}-${end}`);
+        // Get data from frontend
+        const { destination, days, budget, interest } = req.body;
 
-const chunkPrompt = `
+        if (!destination || !days || !budget || !interest) {
+            return res.status(400).json({
+                error: "Destination, days, budget and interest are required."
+            });
+        }
+
+        // ================= IMAGE =================
+
+        let imageUrl = "";
+
+        try {
+
+            const imageResponse = await axios.get(
+                "https://api.unsplash.com/search/photos",
+                {
+                    params: {
+                        query: `${destination} India`,
+                        per_page: 1,
+                        orientation: "landscape"
+                    },
+                    headers: {
+                        Authorization:
+                            `Client-ID ${process.env.UNSPLASH_ACCESS_KEY}`
+                    }
+                }
+            );
+
+            if (imageResponse.data.results.length > 0) {
+
+                imageUrl =
+                    imageResponse.data.results[0].urls.regular;
+
+            } else {
+
+                imageUrl =
+                    "https://images.unsplash.com/photo-1506744038136-46273834b3fb";
+            }
+
+        } catch (err) {
+
+            console.log("Unsplash Error:", err.message);
+
+            imageUrl =
+                "https://images.unsplash.com/photo-1506744038136-46273834b3fb";
+        }
+
+        // ================= AI PLAN =================
+
+        let plan = "";
+
+        const totalDays = Number(days);
+
+        for (let start = 1; start <= totalDays; start++) {
+
+            console.log(`🚀 Requesting Day ${start}`);
+
+            const chunkPrompt = `
 You are an expert travel planner.
 
 Generate ONLY itinerary for Day ${start} in ${destination}.
@@ -108,7 +162,9 @@ Generate ONLY itinerary for Day ${start} in ${destination}.
 Budget: ₹${budget}
 Interest: ${interest}
 
-Return ONLY valid HTML in EXACTLY this format:
+Return ONLY valid HTML.
+
+Use exactly this structure:
 
 <div class="day-card">
 
@@ -136,163 +192,179 @@ Return ONLY valid HTML in EXACTLY this format:
 </ul>
 
 <h3>📍 Google Maps</h3>
-Google Maps:
-Generate a clickable HTML link in exactly this format:
 
 <a href="https://www.google.com/maps/search/Actual Place Name ${destination}" target="_blank">
 📍 Open in Google Maps
 </a>
 
-Example:
-
-<a href="https://www.google.com/maps/search/Nandi Hills Bengaluru" target="_blank">
-📍 Open in Google Maps
-</a>
-
-Never print the full URL as text.
-Never use "Click here".
-Always use "📍 Open in Google Maps" as the link text.
-
 </div>
 
 Rules:
+
 - Generate ONLY Day ${start}.
-- Do NOT generate any other day.
+- Do NOT generate another day.
 - Do NOT use Markdown.
-- Do NOT output raw Google Maps URLs.
-- Always use the clickable text "📍 Open in Google Maps".
-- Follow this HTML structure exactly.
-Additional Rules:
+- Return only HTML.
 - Every day must visit different places.
-- Do not repeat attractions across different days.
+- Do not repeat attractions.
 - Choose famous attractions based on the selected interest.
-- Keep each day's itinerary unique.
+- Keep the itinerary unique.
 `;
 
-        const chunk = await generateChunk(chunkPrompt);
+            const chunk = await generateChunk(chunkPrompt);
 
-        console.log(`✅ Received Days ${start}-${end}`);
-        console.log("Chunk Length:", chunk.length);
+            console.log(`✅ Received Day ${start}`);
+            console.log("Chunk Length:", chunk.length);
 
-        plan += chunk + "\n";
+            plan += chunk + "\n";
 
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-    } catch (err) {
-
-    console.error(`❌ Failed to generate Day ${start}`);
-    console.error(err);
-
-    throw err;
-}
-}
-    
-console.log("PLAN LENGTH:", plan.length);
-console.log(plan);
-let coordinates = null;
-
-// First get coordinates
-try {
-    const geo = await axios.get(
-        "https://nominatim.openstreetmap.org/search",
-        {
-            params: {
-                q: destination,
-                format: "json",
-                limit: 1
-            },
-            headers: {
-                "User-Agent": "SmartTrip"
+            // Wait between requests
+            if (start < totalDays) {
+                await new Promise(resolve =>
+                    setTimeout(resolve, 6000)
+                );
             }
         }
-    );
 
-    if (geo.data.length > 0) {
-        coordinates = {
-            lat: geo.data[0].lat,
-            lon: geo.data[0].lon
-        };
-    }
-
-} catch (err) {
-    console.log("Geo Error:", err.message);
-}
-
-// Now get weather
-let weather = null;
-
-if (coordinates) {
-    try {
-
-        const weatherResponse = await axios.get(
-            "https://api.openweathermap.org/data/2.5/weather",
-            {
-                params: {
-                    lat: coordinates.lat,
-                    lon: coordinates.lon,
-                    appid: process.env.WEATHER_API_KEY,
-                    units: "metric"
-                }
-            }
+        console.log("=================================");
+        console.log("PLAN LENGTH:", plan.length);
+        console.log("DAY CARDS:",
+            (plan.match(/day-card/g) || []).length
         );
+        console.log("=================================");
 
-        weather = {
-            temperature: weatherResponse.data.main.temp,
-            humidity: weatherResponse.data.main.humidity,
-            description: weatherResponse.data.weather[0].description,
-            wind: weatherResponse.data.wind.speed
-        };
+        // ================= LOCATION =================
 
-    } catch (err) {
-        console.log("Weather Error:", err.message);
+        let coordinates = null;
+
+        try {
+
+            const geo = await axios.get(
+                "https://nominatim.openstreetmap.org/search",
+                {
+                    params: {
+                        q: destination,
+                        format: "json",
+                        limit: 1
+                    },
+                    headers: {
+                        "User-Agent": "SmartTrip"
+                    }
+                }
+            );
+
+            if (geo.data.length > 0) {
+
+                coordinates = {
+                    lat: geo.data[0].lat,
+                    lon: geo.data[0].lon
+                };
+
+            }
+
+        } catch (err) {
+
+            console.log("Geo Error:", err.message);
+
+        }
+
+        // ================= WEATHER =================
+
+        let weather = null;
+
+        if (coordinates) {
+
+            try {
+
+                const weatherResponse = await axios.get(
+                    "https://api.openweathermap.org/data/2.5/weather",
+                    {
+                        params: {
+                            lat: coordinates.lat,
+                            lon: coordinates.lon,
+                            appid: process.env.WEATHER_API_KEY,
+                            units: "metric"
+                        }
+                    }
+                );
+
+                weather = {
+                    temperature:
+                        weatherResponse.data.main.temp,
+
+                    humidity:
+                        weatherResponse.data.main.humidity,
+
+                    description:
+                        weatherResponse.data.weather[0].description,
+
+                    wind:
+                        weatherResponse.data.wind.speed
+                };
+
+            } catch (err) {
+
+                console.log("Weather Error:", err.message);
+
+            }
+        }
+
+        // ================= TRANSPORT =================
+
+        let transport = [];
+
+        if (Number(budget) <= 5000) {
+
+            transport = [
+                "🚌 Bus",
+                "🚆 Train",
+                "🚖 Auto Rickshaw"
+            ];
+
+        } else if (Number(budget) <= 15000) {
+
+            transport = [
+                "🚆 Train",
+                "🏍 Bike Rental",
+                "🚖 Taxi"
+            ];
+
+        } else {
+
+            transport = [
+                "✈ Flight",
+                "🚗 Rental Car",
+                "🚖 Cab"
+            ];
+        }
+
+        // ================= RESPONSE =================
+
+        res.json({
+            plan,
+            image: imageUrl,
+            weather,
+            coordinates,
+            transport
+        });
+
+    } catch (error) {
+
+        console.error("❌ Plan generation failed:");
+        console.error(error);
+
+        res.status(500).json({
+            plan: "",
+            error: error.message
+        });
+
+    } finally {
+
+        planGenerating = false;
+
+        console.log("🔓 Plan generation unlocked.");
     }
-}
-let transport = [];
 
-if (Number(budget) <= 5000) {
-
-    transport = [
-        "🚌 Bus",
-        "🚆 Train",
-        "🚖 Auto Rickshaw"
-    ];
-
-}
-else if (Number(budget) <= 15000) {
-
-    transport = [
-        "🚆 Train",
-        "🏍 Bike Rental",
-        "🚖 Taxi"
-    ];
-
-}
-else {
-
-    transport = [
-        "✈ Flight",
-        "🚗 Rental Car",
-        "🚖 Cab"
-    ];
-
-}
-      
-  res.json({
-    plan,
-    image: imageUrl,
-    weather,
-    coordinates,
-    transport
-});
-
-  } catch (error) {
-   console.error("Groq Error:");
-console.error(error.response?.data || error);
-
-    res.status(500).json({
-      plan: "<h2>❌ Error generating itinerary.</h2>",
-    });
-  }
 });
 
 const PORT = process.env.PORT || 5000;
