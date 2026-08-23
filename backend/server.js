@@ -24,19 +24,36 @@ app.get("/", (req, res) => {
   res.send("🚀 SmartTrip Backend Running");
 });
 async function generateChunk(prompt) {
-    const completion = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-            {
-                role: "user",
-                content: prompt
-            }
-        ],
-        max_completion_tokens: 2500,
-        temperature: 0.7
-    });
+    try {
+        console.log("🤖 Sending request to Groq...");
 
-    return completion.choices[0].message.content;
+        const completion = await groq.chat.completions.create({
+            model: "openai/gpt-oss-120b",
+            messages: [
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            max_completion_tokens: 2500,
+            temperature: 0.7
+        });
+
+        console.log("✅ Groq response received");
+
+        return completion.choices[0].message.content;
+
+    } 
+     
+    catch (error) {
+
+        console.error("❌ GROQ REQUEST FAILED");
+        console.error("Status:", error.status);
+        console.error("Message:", error.message);
+        console.error("Response:", error.response?.data);
+
+        throw error;
+    }
 }
 app.post("/api/plan", async (req, res) => {
     console.log("✅ /api/plan called");
@@ -163,11 +180,11 @@ Additional Rules:
 
     } catch (err) {
 
-        console.error(`❌ Failed to generate Days ${start}-${end}`);
-        console.error(err);
+    console.error(`❌ Failed to generate Day ${start}`);
+    console.error(err);
 
-        break; // stop if one chunk fails
-    }
+    throw err;
+}
 }
     
 console.log("PLAN LENGTH:", plan.length);
